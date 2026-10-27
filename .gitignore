@@ -5,3 +5,9 @@ dist
 
 # Ignore the output video from Git but not videos you import into src/.
 out
+
+# Remotion の書き出し用バンドル
+build
+
+# Gemini で動かした映像（大きいので含めない）
+public/**/*.mp4

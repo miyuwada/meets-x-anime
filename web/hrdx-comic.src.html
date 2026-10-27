@@ -1,0 +1,672 @@
+<title>静かな退職コミック</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bangers&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&text=__JPTEXT__&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@700&text=__JPTEXT__&display=swap">
+<style>
+  /* レイアウト：1枚のコミックのコマ（16:9）＋その下に操作バー。ヴィンテージコミックの単一テーマ */
+  :root {
+    --paper: #FFF4D6;
+    --ink: #141414;
+    --yellow: #FFD93D;
+    --cyan: #29B6E8;
+    --red: #EF3E36;
+    --muted: #5A4A2E;
+    --display: "Dela Gothic One", "Noto Sans JP", system-ui, sans-serif;
+    --body: "Noto Sans JP", system-ui, sans-serif;
+    --sfx: "Bangers", "Dela Gothic One", Impact, sans-serif;
+    color-scheme: light;
+  }
+  body {
+    background: var(--paper);
+    background-image: radial-gradient(circle, rgba(239, 62, 54, 0.12) 1.6px, transparent 2px);
+    background-size: 14px 14px;
+    color: var(--ink);
+    font-family: var(--body);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 20px 32px;
+  }
+  .wrap { max-width: 1200px; margin: 0 auto; display: grid; gap: 16px; }
+  header { display: grid; gap: 4px; }
+  .eyebrow { font-family: var(--sfx); font-size: 1.1rem; letter-spacing: 0.08em; color: var(--red); }
+  h1 { font-family: var(--display); font-weight: 400; font-size: clamp(1.3rem, 3.2vw, 2rem); margin: 0; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 0.92rem; margin: 0; }
+  .stage {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    aspect-ratio: 16 / 9;
+    border: 5px solid var(--ink);
+    box-shadow: 8px 8px 0 var(--ink);
+    background: #1F2B4D;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+  .loading {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    font-family: var(--sfx); font-size: clamp(1.4rem, 4vw, 3rem); color: var(--yellow);
+    letter-spacing: 0.06em;
+  }
+  .loading[hidden] { display: none; }
+  .bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  button {
+    font-family: var(--display); font-size: 1rem; font-weight: 400;
+    padding: 10px 18px; border: 3px solid var(--ink); background: var(--yellow); color: var(--ink);
+    box-shadow: 4px 4px 0 var(--ink); cursor: pointer;
+  }
+  button.rec { background: var(--red); color: #FFFFFF; }
+  button.stop { background: #FFFFFF; }
+  button:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--ink); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
+  .status { font-size: 0.92rem; color: var(--muted); min-width: 0; flex: 1 1 220px; }
+  .status.live { color: var(--red); font-weight: 700; }
+  .note { font-size: 0.82rem; color: var(--muted); margin: 0; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">MEETS CONSULTING COLUMN · HRDX</div>
+    <h1>AI予測で離職を防ぐ：静かな退職を検知する</h1>
+    <p class="sub">コラムの内容を3ステップで紹介するモーショングラフィックス（試作・約25秒でループ）</p>
+  </header>
+
+  <div class="stage">
+    <canvas id="cv" width="1920" height="1080" aria-label="静かな退職をAIで検知し、1on1で支える流れのアニメーション"></canvas>
+    <div class="loading" id="loading">LOADING...</div>
+  </div>
+
+  <div class="bar">
+    <button id="replay" type="button">もう一度再生</button>
+    <button id="rec" class="rec" type="button">録画する</button>
+    <button id="stop" class="stop" type="button" disabled>録画停止</button>
+    <span class="status" id="status" role="status">録画すると、最初から1周分（約25秒）を動画にして保存できます。</span>
+  </div>
+  <p class="note">※グラフは説明用のイメージです。録画中はこのタブを開いたままにしてください。</p>
+</div>
+
+<script>
+(() => {
+  const QR = __QR__;
+  const LOGO_SRC = "__LOGO__";
+
+  const W = 1920, H = 1080;
+  const cv = document.getElementById("cv");
+  const ctx = cv.getContext("2d");
+  const INK = "#141414", YELLOW = "#FFD93D", CYAN = "#29B6E8", RED = "#EF3E36", WHITE = "#FFFFFF";
+  const SFX = '"Bangers", Impact, sans-serif';
+  const JP = '"Dela Gothic One", "Noto Sans JP", sans-serif';
+  const JPB = '"Noto Sans JP", sans-serif';
+
+  // シーンの区切り（秒）
+  const S = [0, 7, 14, 21, 25];
+  const TOTAL = S[4];
+  const WIPE = 0.45;
+
+  const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+  const prog = (t, a, d) => clamp((t - a) / d);
+  const easeOut = (p) => 1 - Math.pow(1 - p, 3);
+  const easeBack = (p) => { const c = 1.9; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); };
+  const lerp = (a, b, p) => a + (b - a) * p;
+
+  const logo = new Image();
+  logo.src = LOGO_SRC;
+
+  // 網点（ハーフトーン）の背景を事前に描いておく
+  function halftone(base, dot, spacing, maxR, focusX, focusY) {
+    const c = document.createElement("canvas");
+    c.width = W; c.height = H;
+    const g = c.getContext("2d");
+    g.fillStyle = base; g.fillRect(0, 0, W, H);
+    g.fillStyle = dot;
+    const maxD = Math.hypot(W, H);
+    for (let y = 0; y < H + spacing; y += spacing) {
+      for (let x = ((y / spacing) % 2) * spacing / 2; x < W + spacing; x += spacing) {
+        const d = Math.hypot(x - focusX, y - focusY) / maxD;
+        const r = maxR * clamp(0.25 + d * 1.4, 0.2, 1);
+        g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+      }
+    }
+    return c;
+  }
+  const BG = {
+    gloom: halftone("#1F2B4D", "#2E3F6E", 26, 9, 900, 600),
+    cyan: halftone("#29B6E8", "#1E93C4", 24, 8, 960, 540),
+    yellow: halftone("#FFD93D", "#F5B000", 24, 8, 960, 500),
+    cream: halftone("#FFF4D6", "#F6D9A0", 22, 6, 960, 540),
+  };
+
+  // ---------- 描画の部品 ----------
+  function text(str, x, y, o) {
+    ctx.save();
+    ctx.font = `${o.weight || 400} ${o.size}px ${o.font || JP}`;
+    ctx.textAlign = o.align || "left";
+    ctx.textBaseline = o.base || "alphabetic";
+    ctx.lineJoin = "round";
+    if (o.stroke) { ctx.lineWidth = o.lw || 10; ctx.strokeStyle = o.stroke; ctx.strokeText(str, x, y); }
+    ctx.fillStyle = o.fill || INK;
+    ctx.fillText(str, x, y);
+    ctx.restore();
+  }
+
+  function frame() {
+    ctx.save();
+    ctx.lineWidth = 14; ctx.strokeStyle = INK;
+    ctx.strokeRect(7, 7, W - 14, H - 14);
+    ctx.restore();
+  }
+
+  // 左上のナレーション枠（例：STEP 1｜課題）
+  function narration(step, label, t, at) {
+    const p = easeOut(prog(t, at, 0.35));
+    if (p <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = p;
+    ctx.translate(70, 54 + (1 - p) * -30);
+    ctx.rotate(-0.02);
+    ctx.font = `400 46px ${SFX}`;
+    const w1 = ctx.measureText(step).width;
+    ctx.font = `400 42px ${JP}`;
+    const w2 = ctx.measureText(label).width;
+    const w = w1 + w2 + 90;
+    ctx.fillStyle = INK; ctx.fillRect(10, 10, w, 86);
+    ctx.fillStyle = YELLOW; ctx.fillRect(0, 0, w, 86);
+    ctx.lineWidth = 6; ctx.strokeStyle = INK; ctx.strokeRect(0, 0, w, 86);
+    text(step, 28, 60, { font: SFX, size: 46, fill: RED });
+    text(label, 28 + w1 + 30, 60, { size: 42 });
+    ctx.restore();
+  }
+
+  // 下のテロップ枠（2行まで。出たあとは静止）
+  function caption(lines, t, at) {
+    const p = easeOut(prog(t, at, 0.35));
+    if (p <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = p;
+    ctx.translate(0, (1 - p) * 40);
+    ctx.fillStyle = INK; ctx.fillRect(112, 822, 1716, 200);
+    ctx.fillStyle = WHITE; ctx.fillRect(100, 810, 1716, 200);
+    ctx.lineWidth = 8; ctx.strokeStyle = INK; ctx.strokeRect(100, 810, 1716, 200);
+    lines.forEach((ln, i) => text(ln, 958, 890 + i * 84, { size: 58, align: "center" }));
+    ctx.restore();
+  }
+
+  // ギザギザの吹き出し（擬音）
+  function burst(cx, cy, rOut, rIn, spikes, fill, label, size, s, rot) {
+    if (s <= 0) return;
+    ctx.save();
+    ctx.translate(cx, cy); ctx.rotate(rot); ctx.scale(s, s);
+    ctx.beginPath();
+    for (let i = 0; i < spikes * 2; i++) {
+      const r = i % 2 === 0 ? rOut : rIn;
+      const a = (i / (spikes * 2)) * Math.PI * 2;
+      ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r * 0.72);
+    }
+    ctx.closePath();
+    ctx.fillStyle = INK; ctx.save(); ctx.translate(12, 12); ctx.fill(); ctx.restore();
+    ctx.fillStyle = fill; ctx.fill();
+    ctx.lineWidth = 9; ctx.strokeStyle = INK; ctx.stroke();
+    text(label, 0, size * 0.36, { font: SFX, size, align: "center", fill: YELLOW, stroke: INK, lw: 12 });
+    ctx.restore();
+  }
+
+  // 色を徐々に変える（パッと切り替えない）
+  function mix(a, b, p) {
+    const h = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+    const A = h(a), B = h(b);
+    return "rgb(" + A.map((v, i) => Math.round(lerp(v, B[i], p))).join(",") + ")";
+  }
+
+  // 人物のピクトグラム
+  // o.slump: 1=うなだれる 0=背すじが伸びる / o.smile: 0=沈んだ顔 1=笑顔（連続値）
+  // o.breathe: 呼吸による胸のふくらみ / o.nod: うなずき（px）/ o.arm: 腕の動き
+  function person(x, y, s, o) {
+    const slump = o.slump || 0, smile = o.smile ?? 1, breathe = o.breathe || 0, nod = o.nod || 0;
+    ctx.save();
+    ctx.translate(x, y); ctx.scale(o.flip ? -s : s, s);
+    ctx.lineWidth = 8; ctx.strokeStyle = INK; ctx.lineJoin = "round";
+    // 体（呼吸でわずかに上下）
+    ctx.save(); ctx.scale(1, 1 + breathe);
+    ctx.beginPath();
+    ctx.moveTo(-70, 0); ctx.lineTo(-62, -150); ctx.quadraticCurveTo(-55, -200, 0, -205);
+    ctx.quadraticCurveTo(55, -200, 62, -150); ctx.lineTo(70, 0); ctx.closePath();
+    ctx.fillStyle = o.shirt; ctx.fill(); ctx.lineWidth = 8 / (1 + breathe); ctx.stroke();
+    ctx.restore();
+    const lift = -205 * breathe;
+    // 腕
+    if (o.arm) {
+      const sx = 40, sy = -168 + lift;
+      let ex, ey;
+      if (o.arm.kind === "type") { ex = sx + 125; ey = -112 + lift + Math.sin(o.arm.phase * 5) * 4; }
+      else { const len = o.arm.kind === "point" ? 155 : 120; ex = sx + Math.cos(o.arm.a) * len; ey = sy + Math.sin(o.arm.a) * len; }
+      ctx.save();
+      ctx.lineCap = "round"; ctx.lineWidth = 34; ctx.strokeStyle = INK;
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.lineWidth = 22; ctx.strokeStyle = o.shirt;
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.fillStyle = "#F6D2B4"; ctx.lineWidth = 6; ctx.strokeStyle = INK;
+      ctx.beginPath(); ctx.arc(ex + 6, ey - 4, 18, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+    // 頭（うなだれると前に傾く・うなずき）
+    const hx = 18 * slump, hy = -268 + 38 * slump + lift + nod;
+    ctx.beginPath(); ctx.arc(hx, hy, 58, 0, Math.PI * 2);
+    ctx.fillStyle = "#F6D2B4"; ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(hx, hy - 8, 60, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.lineTo(hx + 52, hy - 22); ctx.quadraticCurveTo(hx, hy - 40, hx - 52, hy - 22); ctx.closePath();
+    ctx.fillStyle = "#2B2B33"; ctx.fill(); ctx.stroke();
+    // 顔（口のカーブを連続的に変える）
+    ctx.fillStyle = INK;
+    const ey = hy + 8 + 6 * slump;
+    ctx.beginPath(); ctx.arc(hx - 20, ey, 6, 0, Math.PI * 2); ctx.arc(hx + 20, ey, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 6; ctx.lineCap = "round";
+    const my = ey + 28;
+    ctx.beginPath(); ctx.moveTo(hx - 18, my); ctx.quadraticCurveTo(hx, my + lerp(-16, 20, smile), hx + 18, my); ctx.stroke();
+    ctx.restore();
+  }
+
+  // カメラ：パン（dx）とズーム（z）。背景ごと動かし、テロップや枠は動かさない
+  function camera(z, dx, cy) {
+    ctx.translate(W / 2 + dx, H / 2);
+    ctx.scale(z, z);
+    ctx.translate(-W / 2, -(cy ?? H / 2));
+  }
+
+  function heart(x, y, s, color) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+    ctx.beginPath();
+    ctx.moveTo(0, 18); ctx.bezierCurveTo(-46, -12, -24, -48, 0, -24); ctx.bezierCurveTo(24, -48, 46, -12, 0, 18);
+    ctx.fillStyle = color; ctx.fill(); ctx.lineWidth = 6; ctx.strokeStyle = INK; ctx.stroke();
+    ctx.restore();
+  }
+  function check(x, y, s) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+    ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2);
+    ctx.fillStyle = "#3BB273"; ctx.fill(); ctx.lineWidth = 6; ctx.strokeStyle = INK; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-13, 0); ctx.lineTo(-3, 11); ctx.lineTo(15, -11);
+    ctx.lineWidth = 8; ctx.strokeStyle = WHITE; ctx.lineCap = "round"; ctx.stroke();
+    ctx.restore();
+  }
+
+  // ---------- シーン1：静かな退職 ----------
+  function scene1(t) {
+    const cp = t / 7;
+    ctx.save();
+    camera(lerp(1.06, 1.12, cp), lerp(50, -50, cp), 560);
+    ctx.drawImage(BG.gloom, 0, 0);
+    // モヤ（見えない孤立）
+    for (let i = 0; i < 7; i++) {
+      const a = t * 0.25 + i * 0.9;
+      const fx = 820 + Math.cos(a) * (260 + i * 30), fy = 470 + Math.sin(a * 1.3) * 140;
+      const g = ctx.createRadialGradient(fx, fy, 10, fx, fy, 230);
+      g.addColorStop(0, "rgba(160,170,200,0.28)"); g.addColorStop(1, "rgba(160,170,200,0)");
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(fx, fy, 230, 0, Math.PI * 2); ctx.fill();
+    }
+    // うっすら集中線（孤立感）
+    ctx.save();
+    ctx.strokeStyle = "rgba(200,210,235,0.10)"; ctx.lineWidth = 6;
+    for (let i = 0; i < 48; i++) {
+      const a = (i / 48) * Math.PI * 2 + Math.sin(i * 7.3) * 0.03;
+      const r0 = 560 + ((i * 97) % 120);
+      ctx.beginPath(); ctx.moveTo(800 + Math.cos(a) * r0, 470 + Math.sin(a) * r0);
+      ctx.lineTo(800 + Math.cos(a) * 1400, 470 + Math.sin(a) * 1400); ctx.stroke();
+    }
+    ctx.restore();
+    // 机・モニター
+    ctx.save();
+    ctx.lineWidth = 8; ctx.strokeStyle = INK;
+    ctx.fillStyle = "#6B4B32"; ctx.fillRect(420, 640, 900, 40); ctx.strokeRect(420, 640, 900, 40);
+    ctx.fillStyle = "#4A3322"; ctx.fillRect(460, 680, 30, 170); ctx.fillRect(1250, 680, 30, 170);
+    ctx.strokeRect(460, 680, 30, 170); ctx.strokeRect(1250, 680, 30, 170);
+    ctx.fillStyle = "#2A2F3A"; ctx.fillRect(950, 430, 300, 190); ctx.strokeRect(950, 430, 300, 190);
+    const glow = 0.55 + 0.1 * Math.sin(t * 2);
+    ctx.fillStyle = `rgba(41,182,232,${glow})`; ctx.fillRect(966, 446, 268, 158);
+    ctx.fillStyle = "#2A2F3A"; ctx.fillRect(1080, 620, 40, 22);
+    ctx.restore();
+    // 社員（うなだれている）
+    person(760, 760, 1.05, { shirt: "#7C8AA5", slump: 1, smile: 0, breathe: 0.014 * Math.sin(t * 1.6), arm: { kind: "type", phase: t } });
+    // 頭上の不穏な波線
+    ctx.save();
+    ctx.strokeStyle = "rgba(180,150,230,0.85)"; ctx.lineWidth = 7; ctx.lineCap = "round";
+    for (let k = 0; k < 3; k++) {
+      ctx.beginPath();
+      for (let x = 0; x <= 260; x += 8) {
+        const y = 330 - k * 46 + Math.sin(x / 26 + t * 2.2 + k) * 12;
+        if (x === 0) ctx.moveTo(640 + x, y); else ctx.lineTo(640 + x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+    // ため息
+    const sp = prog(t, 2, 0.6);
+    if (sp > 0) {
+      ctx.save(); ctx.globalAlpha = sp * 0.9;
+      text("SIGH...", 1380, 330 + Math.sin(t * 1.5) * 6, { font: SFX, size: 96, fill: "#C9CEDC", stroke: INK, lw: 10 });
+      ctx.restore();
+    }
+    ctx.restore();
+    narration("STEP 1", "課題：静かな退職", t, 0.2);
+    caption(["退職届が出てからでは遅い。", "『静かな退職』は目に見えず進行する。"], t, 0.8);
+    frame();
+  }
+
+  // ---------- シーン2：AI検知 ----------
+  const RISK = [0.2, 0.22, 0.19, 0.24, 0.23, 0.3, 0.38, 0.5, 0.62, 0.74, 0.84, 0.9];
+  const SIGNALS = ["勤怠のリズムが乱れる", "チャットの発信が減る", "アンケートの回答が遅れる"];
+  function scene2(t) {
+    const lt = t - S[1];
+    const cp = lt / 7;
+    ctx.save();
+    camera(lerp(1.04, 1.08, cp), lerp(30, -30, cp));
+    ctx.drawImage(BG.cyan, 0, 0);
+    // グラフのパネル
+    const px = 330, py = 190, pw = 700, ph = 590;
+    ctx.save();
+    ctx.fillStyle = INK; ctx.fillRect(px + 12, py + 12, pw, ph);
+    ctx.fillStyle = WHITE; ctx.fillRect(px, py, pw, ph);
+    ctx.lineWidth = 8; ctx.strokeStyle = INK; ctx.strokeRect(px, py, pw, ph);
+    ctx.restore();
+    text("離職リスクの変化", px + 40, py + 74, { size: 40 });
+    text("（イメージ）", px + 360, py + 74, { size: 30, font: JPB, weight: 700, fill: "#6B6B6B" });
+    const gx = px + 60, gy = py + 130, gw = pw - 120, gh = ph - 200;
+    ctx.save();
+    ctx.lineWidth = 5; ctx.strokeStyle = INK;
+    ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(gx, gy + gh); ctx.lineTo(gx + gw, gy + gh); ctx.stroke();
+    // 注意ライン
+    const thY = gy + gh * (1 - 0.6);
+    ctx.setLineDash([18, 14]); ctx.strokeStyle = RED; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(gx, thY); ctx.lineTo(gx + gw, thY); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+    text("注意ライン", gx + gw - 4, thY - 14, { size: 30, align: "right", fill: RED });
+    // 折れ線（発光しながら上昇）
+    // 背景の目盛りが流れ続ける
+    ctx.save();
+    ctx.beginPath(); ctx.rect(gx, gy, gw, gh); ctx.clip();
+    ctx.strokeStyle = "rgba(41,182,232,0.25)"; ctx.lineWidth = 3;
+    for (let k = 0; k < 12; k++) { const xx = gx + ((((k * 70 - lt * 50) % (12 * 70)) + 12 * 70) % (12 * 70)); ctx.beginPath(); ctx.moveTo(xx, gy); ctx.lineTo(xx, gy + gh); ctx.stroke(); }
+    ctx.restore();
+    person(190, 790, 0.82, { shirt: "#1F3A6E", smile: 1, breathe: 0.01 * Math.sin(lt * 1.5), arm: { kind: "point", a: -0.8 + 0.09 * Math.sin(lt * 1.3) } });
+    const lp = prog(lt, 0.4, 2.2);
+    const n = RISK.length - 1;
+    const upto = lp * n;
+    ctx.save();
+    ctx.lineWidth = 10; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.shadowColor = RED; ctx.shadowBlur = 26;
+    ctx.strokeStyle = RED;
+    ctx.beginPath();
+    let lastX = gx, lastY = gy + gh * (1 - RISK[0]);
+    for (let i = 0; i <= Math.floor(upto); i++) {
+      const X = gx + (i / n) * gw, Y = gy + gh * (1 - RISK[i]);
+      if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+      lastX = X; lastY = Y;
+    }
+    const f = upto - Math.floor(upto);
+    if (Math.floor(upto) < n && f > 0) {
+      const i = Math.floor(upto);
+      const X = gx + ((i + f) / n) * gw, Y = gy + gh * (1 - lerp(RISK[i], RISK[i + 1], f));
+      ctx.lineTo(X, Y); lastX = X; lastY = Y;
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = YELLOW; ctx.lineWidth = 6; ctx.strokeStyle = INK;
+    ctx.beginPath(); ctx.arc(lastX, lastY, 14, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.restore();
+
+    // 小さな変化のサイン
+    SIGNALS.forEach((s, i) => {
+      const p = easeOut(prog(lt, 0.8 + i * 0.6, 0.35));
+      if (p <= 0) return;
+      const x = 1090, y = 210 + i * 170;
+      ctx.save();
+      ctx.globalAlpha = p; ctx.translate((1 - p) * 60, 0);
+      ctx.fillStyle = INK; ctx.fillRect(x + 10, y + 10, 720, 130);
+      ctx.fillStyle = WHITE; ctx.fillRect(x, y, 720, 130);
+      ctx.lineWidth = 7; ctx.strokeStyle = INK; ctx.strokeRect(x, y, 720, 130);
+      ctx.fillStyle = YELLOW; ctx.beginPath(); ctx.arc(x + 70, y + 65, 38, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      text("!", x + 70, y + 88, { font: SFX, size: 64, align: "center", fill: RED });
+      text(s, x + 130, y + 84, { size: 44 });
+      ctx.restore();
+    });
+
+    // AI DETECTED!（線が注意ラインを越えたら跳ねて登場）
+    const bp = prog(lt, 2.3, 0.5);
+    burst(600, 450, 230, 150, 14, RED, "AI DETECTED!", 74, easeBack(bp), -0.06 + Math.sin(lt * 3) * 0.015);
+
+    ctx.restore();
+    narration("STEP 2", "AIが変化を検知", t - S[1], 0.15);
+    caption(["勤怠やメッセージの変化から、", "AIが孤立のシグナルを早期検出。"], lt, 1.4);
+    frame();
+  }
+
+  // ---------- シーン3：1on1で支える ----------
+  function quadPoint(a, c, b, p) {
+    const x = (1 - p) * (1 - p) * a[0] + 2 * (1 - p) * p * c[0] + p * p * b[0];
+    const y = (1 - p) * (1 - p) * a[1] + 2 * (1 - p) * p * c[1] + p * p * b[1];
+    return [x, y];
+  }
+  function lightLine(a, c, b, p) {
+    if (p <= 0) return;
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.shadowColor = "#FFF3A0"; ctx.shadowBlur = 30;
+    for (const [w, col] of [[22, "rgba(255,243,160,0.55)"], [9, "#FFE45C"]]) {
+      ctx.lineWidth = w; ctx.strokeStyle = col;
+      ctx.beginPath();
+      for (let k = 0; k <= 40; k++) {
+        const q = (k / 40) * p;
+        const [x, y] = quadPoint(a, c, b, q);
+        if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function scene3(t) {
+    const lt = t - S[2];
+    ctx.save();
+    camera(lerp(1.0, 1.1, easeOut(lt / 7)), 0, 580);
+    // 背景が明るくなる
+    ctx.drawImage(BG.gloom, 0, 0);
+    ctx.save(); ctx.globalAlpha = easeOut(prog(lt, 0.2, 1.0)); ctx.drawImage(BG.yellow, 0, 0); ctx.restore();
+
+    // 窓からの日差し
+    ctx.save(); ctx.globalAlpha = 0.35 * easeOut(prog(lt, 0.3, 1.0)); ctx.fillStyle = WHITE;
+    for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(1180 + i * 230, 0); ctx.lineTo(1300 + i * 230, 0); ctx.lineTo(820 + i * 230, 1080); ctx.lineTo(640 + i * 230, 1080); ctx.closePath(); ctx.fill(); }
+    ctx.restore();
+    // ホワイトボード
+    ctx.save(); ctx.lineWidth = 8; ctx.strokeStyle = INK;
+    ctx.fillStyle = "#9AA3B5"; ctx.fillRect(140, 168, 440, 270); ctx.strokeRect(140, 168, 440, 270);
+    ctx.fillStyle = WHITE; ctx.fillRect(160, 188, 400, 230); ctx.strokeRect(160, 188, 400, 230);
+    ctx.lineWidth = 6; ctx.strokeStyle = CYAN; ctx.beginPath(); ctx.moveTo(190, 380); ctx.lineTo(280, 330); ctx.lineTo(360, 350); ctx.lineTo(460, 250); ctx.stroke();
+    ctx.strokeStyle = RED; ctx.beginPath(); ctx.arc(470, 245, 22, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    const warm = easeOut(prog(lt, 1.6, 1.0));
+    // AI アイコン
+    const ai = [960, 300];
+    ctx.save();
+    const pulse = 1 + 0.03 * Math.sin(lt * 3);
+    ctx.translate(ai[0], ai[1]); ctx.scale(pulse, pulse);
+    ctx.lineWidth = 8; ctx.strokeStyle = INK;
+    ctx.beginPath(); ctx.moveTo(0, -95); ctx.lineTo(0, -130); ctx.stroke();
+    ctx.fillStyle = RED; ctx.beginPath(); ctx.arc(0, -138, 14, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = CYAN;
+    ctx.beginPath(); ctx.roundRect(-110, -95, 220, 170, 40); ctx.fill(); ctx.stroke();
+    text("AI", 0, 26, { font: SFX, size: 110, align: "center", fill: WHITE, stroke: INK, lw: 12 });
+    ctx.restore();
+
+    // 光のライン：AI → 上司・社員 → ふたりをつなぐ
+    const mgr = [520, 600], emp = [1400, 600];
+    lightLine([ai[0] - 60, ai[1] + 80], [700, 380], [mgr[0] + 40, mgr[1] - 300], easeOut(prog(lt, 0.6, 0.9)));
+    lightLine([ai[0] + 60, ai[1] + 80], [1220, 380], [emp[0] - 40, emp[1] - 300], easeOut(prog(lt, 0.6, 0.9)));
+    lightLine([mgr[0] + 120, 640], [960, 720], [emp[0] - 120, 640], easeOut(prog(lt, 1.4, 0.8)));
+
+    // 机とふたり
+    ctx.save();
+    ctx.lineWidth = 8; ctx.strokeStyle = INK; ctx.fillStyle = "#C98A4B";
+    ctx.fillRect(640, 700, 640, 34); ctx.strokeRect(640, 700, 640, 34);
+    ctx.restore();
+    person(mgr[0], 840, 1.0, { shirt: "#1F3A6E", smile: 1, breathe: 0.01 * Math.sin(lt * 1.5), nod: 9 * Math.max(0, Math.sin(lt * 2.2)), arm: { kind: "gesture", a: -0.35 + 0.28 * Math.sin(lt * 1.7) } });
+    person(emp[0], 840, 1.0, { flip: true, shirt: mix("#7C8AA5", "#2FA59A", warm), slump: 1 - warm, smile: warm, breathe: 0.01 * Math.sin(lt * 1.5 + 1), nod: 9 * warm * Math.max(0, Math.sin(lt * 2.2 + 1.6)), arm: { kind: "gesture", a: -0.15 + 0.2 * warm * Math.sin(lt * 1.5 + 0.8) } });
+
+    // ハートとチェックが舞う
+    for (let i = 0; i < 14; i++) {
+      const t0 = 2.0 + (i % 7) * 0.45 + Math.floor(i / 7) * 0.2;
+      const age = lt - t0;
+      if (age < 0) continue;
+      const life = age % 3.2;
+      const x = 260 + ((i * 263) % 1400) + Math.sin(life * 2 + i) * 18;
+      const y = 820 - life * 170;
+      ctx.save(); ctx.globalAlpha = clamp(1 - life / 3.2) * clamp(life * 4);
+      if (i % 3 === 0) check(x, y, 0.9); else heart(x, y, 0.9, i % 2 ? RED : "#FF7FA8");
+      ctx.restore();
+    }
+
+    burst(330, 560, 120, 80, 12, CYAN, "TALK!", 58, easeBack(prog(lt, 1.2, 0.45)), -0.08);
+    const bp = prog(lt, 1.9, 0.5);
+    burst(1500, 250, 250, 160, 14, RED, "1on1 SUPPORT!", 70, easeBack(bp), 0.05);
+
+    ctx.restore();
+    narration("STEP 3", "対話で支える", lt, 0.15);
+    caption(["監視ではなく支援へ。", "データ×対話でつくる強固な組織。"], lt, 1.6);
+    frame();
+  }
+
+  // ---------- 締め：ロゴ＋QR ----------
+  function endCard(t) {
+    const lt = t - S[3];
+    const p = easeOut(prog(lt, 0, 0.3));
+    ctx.drawImage(BG.cream, 0, 0);
+    ctx.save(); ctx.globalAlpha = p;
+    if (logo.complete && logo.naturalWidth) ctx.drawImage(logo, 960 - 266, 70, 532, 126);
+    text("AIは「監視」ではなく「支援」のために。", 960, 300, { size: 70, align: "center" });
+    // パネル
+    const px = 250, py = 380, pw = 1420, ph = 600;
+    ctx.fillStyle = INK; ctx.fillRect(px + 14, py + 14, pw, ph);
+    ctx.fillStyle = WHITE; ctx.fillRect(px, py, pw, ph);
+    ctx.lineWidth = 9; ctx.strokeStyle = INK; ctx.strokeRect(px, py, pw, ph);
+    text("同じようなお悩みを", px + 90, py + 170, { size: 54 });
+    text("お持ちの方は", px + 90, py + 250, { size: 54 });
+    text("こちらから ▶", px + 90, py + 400, { size: 104, fill: RED, stroke: INK, lw: 6 });
+    text("コラムの続きは meetsc.co.jp/blog", px + 90, py + 510, { size: 34, font: JPB, weight: 700, fill: "#5A4A2E" });
+    // QRコード
+    const qs = 440, qx = px + pw - qs - 80, qy = py + (ph - qs) / 2;
+    ctx.fillStyle = WHITE; ctx.fillRect(qx, qy, qs, qs);
+    ctx.lineWidth = 6; ctx.strokeStyle = INK; ctx.strokeRect(qx, qy, qs, qs);
+    const cell = qs / 37;
+    ctx.fillStyle = "#000000";
+    for (const [cx, cy] of QR) ctx.fillRect(Math.floor(qx + cx * cell), Math.floor(qy + cy * cell), Math.ceil(cell), Math.ceil(cell));
+    ctx.restore();
+    frame();
+  }
+
+  const SCENES = [scene1, scene2, scene3, endCard];
+
+  function render(t) {
+    let k = 0;
+    while (k < 3 && t >= S[k + 1]) k++;
+    SCENES[k](t);
+    // コマ割り風のななめワイプで前のシーンから切り替える
+    const wp = (t - S[k]) / WIPE;
+    if (k > 0 && wp < 1) {
+      ctx.save();
+      const edge = easeOut(wp) * (W + 600);
+      ctx.beginPath();
+      ctx.moveTo(edge, 0); ctx.lineTo(W, 0); ctx.lineTo(W, H); ctx.lineTo(edge - 600, H); ctx.closePath();
+      ctx.clip();
+      SCENES[k - 1](S[k] - 0.001);
+      ctx.restore();
+      ctx.save();
+      ctx.lineWidth = 16; ctx.strokeStyle = INK;
+      ctx.beginPath(); ctx.moveTo(edge, 0); ctx.lineTo(edge - 600, H); ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // ---------- 再生と録画 ----------
+  let startAt = performance.now();
+  let recorder = null, chunks = [], recMime = "", recExt = "webm";
+  const $ = (id) => document.getElementById(id);
+  const status = $("status"), btnRec = $("rec"), btnStop = $("stop"), btnReplay = $("replay");
+
+  function setStatus(msg, live) { status.textContent = msg; status.classList.toggle("live", !!live); }
+
+  function loop(now) {
+    let t = (now - startAt) / 1000;
+    if (recorder && t >= TOTAL) { stopRecording(); }
+    t = t % TOTAL;
+    render(t);
+    requestAnimationFrame(loop);
+  }
+
+  function pickMime() {
+    if (!window.MediaRecorder) return null;
+    const list = [["video/mp4;codecs=avc1", "mp4"], ["video/mp4", "mp4"], ["video/webm;codecs=vp9", "webm"], ["video/webm", "webm"]];
+    for (const [m, ext] of list) if (MediaRecorder.isTypeSupported(m)) return [m, ext];
+    return null;
+  }
+
+  let downloads = null;
+  const ready = (window.claude && window.claude.use) ? window.claude.use("downloads").then((d) => { downloads = d; }).catch(() => {}) : Promise.resolve();
+
+  function startRecording() {
+    const pick = pickMime();
+    if (!pick || !cv.captureStream) { setStatus("このブラウザでは録画できません。最新のChromeかEdgeでお試しください。"); return; }
+    [recMime, recExt] = pick;
+    chunks = [];
+    const stream = cv.captureStream(60);
+    recorder = new MediaRecorder(stream, { mimeType: recMime, videoBitsPerSecond: 12000000 });
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    recorder.onstop = saveRecording;
+    startAt = performance.now();
+    recorder.start(500);
+    btnRec.disabled = true; btnReplay.disabled = true; btnStop.disabled = false;
+    setStatus("● 録画中… 1周（約25秒）で自動的に止まります。", true);
+  }
+
+  function stopRecording() {
+    if (!recorder) return;
+    const r = recorder; recorder = null;
+    if (r.state !== "inactive") r.stop();
+    btnStop.disabled = true;
+  }
+
+  async function saveRecording() {
+    const blob = new Blob(chunks, { type: recMime });
+    btnRec.disabled = false; btnReplay.disabled = false;
+    await ready;
+    if (!downloads) {
+      setStatus("録画はできましたが、この画面では保存できません。claude.ai でこのページを開いてお試しください。");
+      return;
+    }
+    setStatus("保存の確認画面を表示しています…");
+    try {
+      await downloads.save({ filename: `quiet-quitting-hrdx.${recExt}`, data: blob });
+      setStatus(`動画（${recExt.toUpperCase()}）を保存しました。`);
+    } catch (e) {
+      const code = e && e.code;
+      if (code === "declined") setStatus("保存を取り消しました。もう一度録画すると保存できます。");
+      else if (code === "rate_limited") setStatus("確認画面がすでに開いています。少し待ってからお試しください。");
+      else setStatus("この画面では動画を保存できませんでした。");
+    }
+  }
+
+  btnReplay.addEventListener("click", () => { startAt = performance.now(); setStatus("最初から再生しています。"); });
+  btnRec.addEventListener("click", startRecording);
+  btnStop.addEventListener("click", stopRecording);
+
+  // フォントを読み込んでから再生（canvas は読み込み前のフォントで描くと崩れるため）
+  const fontLoads = [
+    document.fonts.load(`400 80px "Bangers"`, "AI DETECTED!"),
+    document.fonts.load(`400 64px "Dela Gothic One"`, "静かな退職を検知する対話支援"),
+    document.fonts.load(`700 34px "Noto Sans JP"`, "コラムの続きは"),
+  ];
+  Promise.race([Promise.all(fontLoads), new Promise((r) => setTimeout(r, 4000))]).then(() => {
+    $("loading").hidden = true;
+    startAt = performance.now();
+    requestAnimationFrame(loop);
+  });
+})();
+</script>
